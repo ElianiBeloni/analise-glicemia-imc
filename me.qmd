@@ -1,0 +1,484 @@
+---
+title: "Relatório: Associação entre Glicemia e IMC - Disciplina de Modelos Estatísticos /IMPA Tech "
+author: "Eliani Magalhães Beloni"
+date: "2026-09-26"
+lang: pt
+format:
+  pdf:
+    toc: false
+    number-sections: false
+    colorlinks: true
+    geometry:
+      - top=2.5cm
+      - bottom=2.5cm
+      - left=2.5cm
+      - right=2.5cm
+---
+
+```{r setup, include=FALSE}
+# Configurações globais de exibição
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  warning = FALSE, 
+  message = FALSE,
+  fig.width = 6.5, 
+  fig.height = 4.5,
+  fig.align = "center"
+)
+
+# Carregamento de bibliotecas 
+library(tidyverse, quietly = TRUE, warn.conflicts = FALSE)
+library(car)      # Para cálculo do VIF
+library(knitr)    # Para tabelas formatadas
+library(patchwork)
+```
+
+```{r}
+#| include: false
+# Leitura do banco de dados glicemia_h.csv
+glicemia_df <- read_csv("glicemia_h.csv")
+
+# Definindo categorias de base
+glicemia_df$sexo <- glicemia_df$sexo |> as.factor() |> relevel(ref = "Feminino")
+glicemia_df$historico_familiar <- glicemia_df$historico_familiar |> as.factor() |> relevel(ref = "Não")
+glicemia_df$hipertensao <- glicemia_df$hipertensao |> as.factor() |> relevel(ref = "Não")
+```
+
+# 1. Análise Descritiva e Bivariada
+
+Para compreender o perfil dos 142 adultos da amostra e antecipar os fatores associados aos níveis de glicemia em jejum (`glicemia`), realizou-se uma análise exploratória abrangendo o comportamento individual de cada variável (univariada) e a relação da variável resposta com as explicativas (bivariada).
+
+## Principais Resultados
+
+* **Análise Univariada**
+  * **Glicemia (`glicemia`):** Apresenta ampla variação (entre $70$ e $180\text{ mg/dL}$), cobrindo faixas desde a euglicemia até a hiperglicemia.
+  * **IMC (`imc`):** Concentra-se predominantemente entre $24$ e $28\text{ kg/m}^2$, indicando alta proporção de indivíduos com sobrepeso.
+  * **Condições Categóricas:** Predominam participantes sem diagnóstico de hipertensão ($72{,}5\%$) e sem histórico familiar de *Diabetes Mellitus* ($62{,}7\%$).
+
+* **Análise Bivariada (Relação com a Glicemia):**
+  * **IMC:** Mostra uma **forte relação linear positiva** (maior IMC está associado a níveis mais elevados de glicemia em jejum).
+  * **Atividade Física:** Exibe uma **relação linear negativa** (maior tempo semanal de atividade física atua como fator associado a menores níveis glicêmicos).
+  * **Idade:** Não apresenta tendência linear expressiva em relação à glicemia nesta amostra.
+  * **Sexo, Hipertensão e Histórico Familiar:** Apresentam distribuições de glicemia relativamente semelhantes entre suas categorias quando analisados de forma isolada.
+
+> Os gráficos detalhados das distribuições e das relações bivariadas com a glicemia encontram-se apresentados a seguir.
+
+## Sumário Estatístico
+
+```{r}
+#| echo: false
+# Tabela resumo das variáveis numéricas
+resumo_numerico <- glicemia_df |>
+  summarise(
+    across(c(glicemia, imc, idade, atividade_fisica),
+           list(Média = mean, DP = sd, Mín = min, Mediana = median, Máx = max),
+           .names = "{.col}__{.fn}")
+  ) |>
+  pivot_longer(everything(), names_to = c("Variável", ".value"), names_sep = "__") |>
+  mutate(Variável = case_when(
+    Variável == "glicemia"         ~ "Glicemia (mg/dL)",
+    Variável == "imc"              ~ "IMC (kg/m²)",
+    Variável == "idade"            ~ "Idade (anos)",
+    Variável == "atividade_fisica" ~ "Atividade física (min/sem)"
+  ))
+
+kable(resumo_numerico, digits = 1,
+      caption = "Resumo das variáveis numéricas")
+```
+
+```{r}
+#| echo: false
+resumo_categorico <- glicemia_df |>
+  select(sexo, historico_familiar, hipertensao) |>
+  pivot_longer(everything(), names_to = "Variável", values_to = "Categoria") |>
+  count(Variável, Categoria) |>
+  group_by(Variável) |>
+  mutate(Percentual = round(100 * n / sum(n), 1)) |>
+  ungroup() |>
+  mutate(Variável = factor(Variável,
+                            levels = c("sexo", "historico_familiar", "hipertensao"),
+                            labels = c("Sexo", "Histórico familiar", "Hipertensão"))) |>
+  arrange(Variável)
+
+kable(resumo_categorico,
+      col.names = c("Variável", "Categoria", "n", "%"),
+      caption = "Resumo das variáveis categóricas")
+```
+
+## Análise Univariada (Distribuições)
+
+```{r}
+#| echo: false
+#| fig-width: 6.5
+#| fig-height: 4.5
+# Glicemia
+p_glicemia <- ggplot(glicemia_df, aes(x = glicemia)) +
+  geom_histogram(bins = 15, fill = "#4C72B0", color = "white", alpha = 0.8) +
+  labs(title = "Glicemia", x = "Glicemia (mg/dL)", y = "Frequência") +
+  theme_light(base_size = 9)
+
+# IMC
+p_imc <- ggplot(glicemia_df, aes(x = imc)) +
+  geom_histogram(bins = 15, fill = "#55A868", color = "white", alpha = 0.8) +
+  labs(title = "IMC", x = "IMC (kg/m²)", y = "Frequência") +
+  theme_light(base_size = 9)
+
+# Hipertensão
+p_hip <- ggplot(glicemia_df, aes(x = hipertensao, fill = hipertensao)) +
+  geom_bar(width = 0.55, show.legend = FALSE, alpha = 0.8) +
+  geom_text(stat = 'count', aes(label = after_stat(count)), vjust = -0.5, size = 3.5, fontface = "bold") +
+  scale_y_continuous(limits = c(0, 120), expand = c(0, 0)) +
+  labs(title = "Hipertensão", x = "Hipertensão", y = "Frequência") +
+  theme_light(base_size = 9)
+
+# Histórico Familiar
+p_hist <- ggplot(glicemia_df, aes(x = historico_familiar, fill = historico_familiar)) +
+  geom_bar(width = 0.55, show.legend = FALSE, alpha = 0.8) +
+  geom_text(stat = 'count', aes(label = after_stat(count)), vjust = -0.5, size = 3.5, fontface = "bold") +
+  scale_y_continuous(limits = c(0, 120), expand = c(0, 0)) +
+  labs(title = "Histórico Familiar", x = "Histórico Familiar", y = "Frequência") +
+  theme_light(base_size = 9)
+
+# Painel unificado 2x2
+(p_glicemia + p_imc) / (p_hip + p_hist)
+```
+
+## Análise Bivariada (Relações com a Glicemia)
+
+```{r}
+#| echo: false
+#| fig-width: 6.5
+#| fig-height: 7
+# Glicemia vs IMC
+g_imc <- ggplot(glicemia_df, aes(x = imc, y = glicemia)) +
+  geom_point(aes(color = sexo), size = 1.8, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "gray30", linetype = "solid", linewidth = 0.8) +
+  labs(title = "Glicemia vs IMC", x = "IMC (kg/m²)", y = "Glicemia (mg/dL)", color = "Sexo") +
+  theme_light(base_size = 8.5)
+
+# Glicemia vs Idade
+g_idade <- ggplot(glicemia_df, aes(x = idade, y = glicemia)) +
+  geom_point(aes(color = sexo), size = 1.8, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "gray30", linetype = "solid", linewidth = 0.8) +
+  labs(title = "Glicemia vs Idade", x = "Idade (anos)", y = "Glicemia (mg/dL)", color = "Sexo") +
+  theme_light(base_size = 8.5)
+
+# Glicemia vs Atividade Física
+g_af <- ggplot(glicemia_df, aes(x = atividade_fisica, y = glicemia)) +
+  geom_point(aes(color = sexo), size = 1.8, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "gray30", linetype = "solid", linewidth = 0.8) +
+  labs(title = "Glicemia vs Ativ. Física", x = "Ativ. Física (min/sem)", y = "Glicemia (mg/dL)", color = "Sexo") +
+  theme_light(base_size = 8.5)
+
+# Glicemia por Sexo
+g_box_sexo <- ggplot(glicemia_df, aes(x = sexo, y = glicemia, fill = sexo)) +
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  labs(title = "Glicemia por Sexo", x = "Sexo", y = "Glicemia (mg/dL)") +
+  theme_light(base_size = 8.5)
+
+# Glicemia por Hipertensão
+g_box_hip <- ggplot(glicemia_df, aes(x = hipertensao, y = glicemia)) +
+  geom_boxplot(fill = "#D1D5DB", color = "gray20", alpha = 0.8, show.legend = FALSE) +
+  labs(title = "Glicemia por Hipertensão", x = "Hipertensão", y = "Glicemia (mg/dL)") +
+  theme_light(base_size = 8.5)
+
+# Glicemia por Histórico Familiar
+g_box_hist <- ggplot(glicemia_df, aes(x = historico_familiar, y = glicemia)) +
+  geom_boxplot(fill = "#D1D5DB", color = "gray20", alpha = 0.8, show.legend = FALSE) +
+  labs(title = "Glicemia por Histórico", x = "Histórico Familiar", y = "Glicemia (mg/dL)") +
+  theme_light(base_size = 8.5)
+
+# ORGANIZAÇÃO EM PAINEL 3x2 (Três linhas com dois gráficos cada)
+(g_imc + g_idade) / (g_af + g_box_sexo) / (g_box_hip + g_box_hist) + 
+  plot_layout(guides = "collect")
+```
+
+# 2. Verificação de Multicolinearidade
+
+Para verificar a presença de multicolinearidade entre as variáveis explicativas, utiliza-se o **Fator de Inflação da Variância (VIF)**.
+
+Os valores obtidos situaram-se todos entre $1{,}02$ e $1{,}12$, muito próximos do valor ideal de $1{,}0$. Como todos os valores são inferiores ao limite adotado na literatura ($\text{VIF} < 5$), conclui-se que **não existe multicolinearidade** entre os preditores no modelo ajustado.
+
+```{r}
+#| include: false
+# Modelo completo com todas as variáveis
+mod_completo <- lm(glicemia ~ imc + idade + atividade_fisica + sexo +
+                      historico_familiar + hipertensao, data = glicemia_df)
+```
+
+```{r}
+#| echo: false
+kable(vif(mod_completo), col.names = "VIF", digits = 2,
+      caption = "Fator de Inflação da Variância (VIF) do modelo completo")
+```
+
+# 3. Ajuste e Comparação de Modelos Lineares
+
+A construção do modelo seguiu uma estratégia **sequencial**, partindo da variável de maior interesse (`imc`) e adicionando demais covariáveis uma a uma, testando a cada passo (via `anova()`, teste F para modelos aninhados) se a inclusão melhora significativamente o ajuste.
+
+```{r}
+#| include: false
+
+# Passos 1 a 3: imc, atividade física e sua interação
+m1 <- lm(glicemia ~ imc, data = glicemia_df)
+m2 <- lm(glicemia ~ imc + atividade_fisica, data = glicemia_df)
+m3 <- lm(glicemia ~ imc * atividade_fisica, data = glicemia_df)
+
+p_m1_m2 <- anova(m1, m2)$`Pr(>F)`[2]
+p_m2_m3 <- anova(m2, m3)$`Pr(>F)`[2]
+
+# Decisão automática: mantém a interação só se p < 0.05
+base_modelo <- if (p_m2_m3 < 0.05) m3 else m2
+nome_base   <- if (p_m2_m3 < 0.05) "`imc * atividade_fisica`" else "`imc + atividade_fisica`"
+
+# Passos 4 a 7: idade, sexo, historico_familiar, hipertensao
+m4 <- update(base_modelo, . ~ . + idade)
+m5 <- update(m4, . ~ . + sexo)
+m6 <- update(m5, . ~ . + historico_familiar)
+m7 <- update(m6, . ~ . + hipertensao)
+
+p_incremento <- function(modelo_menor, modelo_maior) {
+  anova(modelo_menor, modelo_maior)$`Pr(>F)`[2]
+}
+
+p_base_m4 <- p_incremento(base_modelo, m4)
+p_m4_m5   <- p_incremento(m4, m5)
+p_m5_m6   <- p_incremento(m5, m6)
+p_m6_m7   <- p_incremento(m6, m7)
+
+modelos_lista <- list(m1 = m1, m2 = m2, m3 = m3, m4 = m4, m5 = m5, m6 = m6, m7 = m7)
+
+resumo_passos <- tibble(
+  Passo = c("1. imc", "2. + atividade_fisica", "3. + imc:atividade_fisica",
+            "4. + idade", "5. + sexo", "6. + historico_familiar", "7. + hipertensao"),
+  AIC = map_dbl(modelos_lista, AIC),
+  BIC = map_dbl(modelos_lista, BIC),
+  `R² Adj (%)` = map_dbl(modelos_lista, ~ summary(.x)$adj.r.squared) * 100,
+  `p-valor (vs. anterior)` = c(NA, p_m1_m2, p_m2_m3, p_base_m4, p_m4_m5, p_m5_m6, p_m6_m7)
+)
+
+# Escolhe o modelo final: último passo em que p < 0.05, a partir do base_modelo
+passos_pvals <- c(p_base_m4, p_m4_m5, p_m5_m6, p_m6_m7)
+passos_modelos <- list(m4, m5, m6, m7)
+ultimo_signif <- max(c(0, which(passos_pvals < 0.05)))
+
+mod_final <- if (ultimo_signif == 0) base_modelo else passos_modelos[[ultimo_signif]]
+
+p_min_passos <- min(passos_pvals, na.rm = TRUE)
+
+r2_final    <- summary(mod_final)$r.squared
+r2adj_final <- summary(mod_final)$adj.r.squared
+sigma_final <- summary(mod_final)$sigma
+```
+
+```{r}
+#| echo: false
+kable(resumo_passos, digits = c(0, 2, 2, 2, 4),
+      caption = "Construção sequencial do modelo: AIC, BIC, R² ajustado e teste F de cada incremento")
+```
+
+
+A inclusão do termo de interação (`imc:atividade_fisica`) não apresentou significância estatística ao nível de 5% (p = 0,0696). De forma análoga, nenhuma das demais covariáveis adicionadas subsequentemente (idade, sexo, histórico familiar e hipertensão) melhorou o ajuste do modelo, apresentando p-valores elevados (todos acima de 0,41). Adicionalmente, os critérios AIC e BIC pioraram progressivamente a cada inclusão. Portanto, o modelo final manteve-se apenas com os efeitos principais **`imc + atividade_fisica`**.
+
+## Modelo Final
+
+```{r}
+#| echo: false
+kable(coef(summary(mod_final)), digits = 3,
+      caption = "Estimativas do modelo final (glicemia ~ imc + atividade_fisica)")
+```
+
+O modelo final apresentou $R^2$ = `r signif(r2_final*100, 3)`% e $R^2$ ajustado = `r signif(r2adj_final*100, 3)`%, indicando que o `imc` e a `atividade_fisica` explicam juntos cerca de um terço da variabilidade da glicemia em jejum nesta amostra. O erro padrão residual foi de `r signif(sigma_final, 3)` mg/dL.
+
+```{r}
+#| echo: false
+#| fig-width: 5.5
+#| fig-height: 3
+tibble(term = names(coef(mod_final)), Est = coef(mod_final)) |>
+  bind_cols(confint(mod_final)) |>
+  filter(term != "(Intercept)") |>
+  mutate(term = fct_reorder(term, Est)) |>
+  ggplot(aes(Est, term)) +
+  geom_point() +
+  geom_linerange(aes(xmin = `2.5 %`, xmax = `97.5 %`)) +
+  geom_vline(xintercept = 0, lty = 2) +
+  labs(x = "Estimativa do efeito na glicemia (mg/dL)", y = NULL,
+       title = "Coefficient plot - Modelo final") +
+  theme_bw(base_size = 9)
+```
+
+## Por que não testar interações adicionais
+
+Não foi encontrada justificativa para testar produtos entre variáveis (termos de interação) além do que já foi testado. Idade, sexo, histórico familiar e hipertensão, quando adicionadas ao modelo uma a uma, não tiveram efeito relevante sobre a glicemia (p > `r signif(p_min_passos, 2)` em todos os casos, ver tabela 4). Como nenhuma dessas variáveis mostrou efeito nem de forma simples, não faz sentido testar interações envolvendo elas. A única interação com justificativa teórica, `imc:atividade_fisica`, também não foi significativa (p = `r signif(p_m2_m3, 3)`). Testar mais interações sem essa base aumentaria o risco de achar resultados por acaso, sem ganho real de explicação. Por isso o modelo final permanece **`glicemia ~ imc + atividade_fisica`**.
+
+# 4. Análise de Resíduos e Suposições do Modelo Final
+
+```{r}
+#| include: false
+
+n_obs <- nrow(glicemia_df)
+p_par <- mod_final$rank  # número de parâmetros (incluindo intercepto)
+
+dados_diag <- glicemia_df |>
+  mutate(
+    res     = rstandard(mod_final),
+    Ordem   = row_number(),
+    Fit     = mod_final$fitted.values,
+    hii     = hatvalues(mod_final),
+    hipn    = hii * n_obs / p_par,
+    dffits  = dffits(mod_final),
+    Dcook   = cooks.distance(mod_final)
+  )
+
+teste_shapiro <- shapiro.test(dados_diag$res)
+
+# Observações sinalizadas como influentes por pelo menos uma medida
+influencia <- influence.measures(mod_final)
+idx_influentes <- which(apply(influencia$is.inf, 1, any))
+n_influentes <- length(idx_influentes)
+```
+
+## Normalidade dos Resíduos
+
+```{r}
+#| echo: false
+#| fig-width: 5
+#| fig-height: 3.5
+qqnorm(dados_diag$res, main = "Normal Q-Q Plot dos resíduos padronizados")
+qqline(dados_diag$res)
+```
+
+O teste de Shapiro-Wilk resultou em W = `r signif(teste_shapiro$statistic, 3)` e p-valor = `r signif(teste_shapiro$p.value, 3)`, **não rejeitando** a hipótese de normalidade dos resíduos a 5%. O gráfico Q-Q, no entanto, mostra um leve desvio da reta teórica nas caudas (pontos mais extremos, tanto positivos quanto negativos, ficam ligeiramente acima/abaixo da reta), sugerindo caudas um pouco mais pesadas que a distribuição normal. Como o teste formal não indicou violação significativa e o desvio visual é discreto, concluímos que a suposição de normalidade é **razoavelmente atendida**, sem comprometer de forma relevante a validade das inferências do modelo.
+
+## Homocedasticidade e Independência
+
+```{r}
+#| echo: false
+#| fig-width: 5.5
+#| fig-height: 3.5
+ggplot(dados_diag, aes(x = Fit, y = res)) +
+  geom_point() +
+  geom_hline(yintercept = c(-2, 0, 2), linetype = c(2, 1, 2)) +
+  labs(x = "Valores ajustados (fitted)", y = "Resíduos padronizados",
+       title = "Resíduos padronizados vs. valores ajustados") +
+  theme_bw(base_size = 10)
+```
+
+```{r}
+#| echo: false
+#| fig-width: 5.5
+#| fig-height: 3.5
+ggplot(dados_diag, aes(x = Ordem, y = res)) +
+  geom_point() +
+  geom_hline(yintercept = c(-2, 0, 2), linetype = c(2, 1, 2)) +
+  labs(x = "Ordem dos dados (ID)", y = "Resíduos padronizados",
+       title = "Resíduos padronizados vs. ordem dos dados") +
+  theme_bw(base_size = 10)
+```
+
+O gráfico de resíduos vs. valores ajustados não mostra padrão sistemático (sem funil, sem curvatura), sustentando a homocedasticidade.
+
+Já o gráfico de resíduos vs. ordem dos dados exibe blocos alternados de resíduos positivos e negativos. Essa oscilação sistemática decorre diretamente da estrutura da variável idade: ao analisar o gráfico de dispersão entre idade e glicemia, observa-se a presença de um padrão sintético não linear (o artefato geométrico do *Datasaurus Dozen*). Como as observações foram registradas no arquivo seguindo a trajetória do contorno dessa figura, a ordem dos dados reflete a variação espacial dos pontos em relação à reta de regressão. Isso demonstra que a falta de aleatoriedade nos resíduos não se deve a uma falha temporal de coleta, mas sim à tentativa do modelo linear de ajustar uma reta a uma estrutura puramente não linear.
+
+
+
+## Pontos Influentes
+
+```{r}
+#| echo: false
+#| fig-width: 5.5
+#| fig-height: 3.5
+ggplot(dados_diag, aes(x = Ordem, y = Dcook)) +
+  geom_point() +
+  geom_hline(yintercept = qf(c(0.5, 0.75), df1 = p_par, df2 = n_obs - p_par),
+             linetype = 2:3) +
+  labs(x = "Índice da observação", y = "Distância de Cook",
+       title = "Distância de Cook por observação") +
+  theme_bw(base_size = 10)
+```
+
+```{r}
+#| echo: false
+# Formatação limpa das observações sinalizadas por medidas de influência
+# Identifica os índices das observações sinalizadas como influentes
+idx_inf <- which(apply(influencia$is.inf, 1, any))
+
+# Extrai as linhas correspondentes da matriz
+inf_df <- as.data.frame(influencia$infmat[idx_inf, ])
+colnames(inf_df) <- c("dfb.1", "dfb.imc", "dfb.atv", "dffit", "cov.r", "cook.d", "hat")
+
+# Gera apenas a tabela formatada
+kable(inf_df, digits = 3,
+      caption = "Observações sinalizadas por pelo menos uma medida de influência")
+```
+
+A Tabela 6 detalha as observações sinalizadas por pelo menos uma medida de influência:
+
+* **Efeito na Precisão ($COVRATIO$):** Os pontos **#8, #26, #85, #122 e #141** foram indicados apenas pela alteração na variância (`cov.r` $> 1{,}063$), sem impacto na reta ajustada ($Cook.D \le 0{,}003$).
+* **Desvios Locais ($DFBETAS$ / $DFFITS$):** As maiores oscilações pontuais ocorreram nos pontos **#83** (maior impacto no coeficiente do IMC, $dfb.imc = 0{,}362$) e **#119** (maior desvio na predição, $dffit = -0{,}488$).
+* **Influência Global ($Cook.D$):** A maior distância de Cook registrada foi $0{,}077$ (ponto **#119**), valor expressivamente inferior ao limite crítico ($0{,}8$).
+
+Portanto, nenhuma observação atua como ponto influente prejudicial, garantindo a estabilidade das estimativas do modelo.
+
+# 5. Equação do Modelo Final e Interpretação
+
+```{r}
+#| include: false
+coefs_final <- coef(mod_final)
+beta0    <- coefs_final["(Intercept)"]
+beta_imc <- coefs_final["imc"]
+beta_af  <- coefs_final["atividade_fisica"]
+
+ic_imc <- confint(mod_final)["imc", ]
+```
+
+O modelo final ajustado foi:
+
+$$
+\widehat{\text{Glicemia}} = `r signif(beta0, 3)` + `r signif(beta_imc, 3)` \cdot \text{IMC} - `r signif(abs(beta_af), 4)` \cdot \text{Atividade física}
+$$
+
+onde **Glicemia** é medida em mg/dL, **IMC** em kg/m², e **Atividade física** em minutos semanais de atividade moderada.
+
+**Interpretação do efeito do IMC:**
+Mantendo constante o tempo de atividade física, cada aumento de 1 kg/m² no IMC está associado, em média, a um aumento de `r signif(beta_imc, 3)` mg/dL na glicemia em jejum (IC 95%: `r signif(ic_imc[1], 3)` a `r signif(ic_imc[2], 3)` mg/dL). Como o intervalo de confiança não inclui o zero, esse efeito é estatisticamente significativo. Em termos práticos, um aumento de 5 pontos no IMC (por exemplo, saindo de um IMC de 25 para 30, uma mudança de sobrepeso para obesidade) corresponderia a um acréscimo médio de aproximadamente `r signif(beta_imc * 5, 3)` mg/dL na glicemia, controlando pelo nível de atividade física.
+
+# 6. Comparação do Efeito do IMC (Modelo Simples vs. Modelo Final)
+
+```{r}
+#| include: false
+beta_imc_simples <- coef(m1)["imc"]
+ic_imc_simples   <- confint(m1)["imc", ]
+
+variacao_pct <- 100 * (beta_imc - beta_imc_simples) / beta_imc_simples
+```
+
+```{r}
+#| echo: false
+tibble(
+  Modelo = c("Simples (glicemia ~ imc)", "Final (glicemia ~ imc + atividade_fisica)"),
+  `Coeficiente do IMC` = c(beta_imc_simples, beta_imc),
+  `IC 95% inferior` = c(ic_imc_simples[1], ic_imc[1]),
+  `IC 95% superior` = c(ic_imc_simples[2], ic_imc[2])
+) |>
+  kable(digits = 3, caption = "Comparação do efeito do IMC entre o modelo simples e o modelo final")
+```
+
+No modelo simples, cada aumento de 1 kg/m² no IMC está associado a um aumento médio de `r signif(beta_imc_simples, 3)` mg/dL na glicemia. Já no modelo final, controlando pela atividade física, esse efeito passa a ser `r signif(beta_imc, 3)` mg/dL, uma `r if (beta_imc > beta_imc_simples) "elevação" else "redução"` de aproximadamente `r signif(abs(variacao_pct), 3)`% em relação ao modelo simples.
+
+```{r}
+#| include: false
+cor_imc_af <- cor.test(glicemia_df$imc, glicemia_df$atividade_fisica)
+```
+
+Essa mudança sugere que parte da associação observada entre IMC e glicemia no modelo simples é parcialmente explicada pelo nível de atividade física (um possível confundidor): há uma correlação negativa entre IMC e atividade física nesta amostra (r = `r signif(cor_imc_af$estimate, 2)`, p = `r signif(cor_imc_af$p.value, 3)`). Ainda assim, o efeito do IMC permanece estatisticamente significativo em ambos os modelos (os intervalos de confiança não cruzam o zero em nenhum dos dois casos), reforçando que o IMC tem uma associação própria e relevante com a glicemia, independentemente do nível de atividade física.
+
+# 7. Inferência de Causalidade e Mudanças Individuais
+
+**Não.** Os resultados indicam apenas **associação estatística**, e não uma relação de **causa e efeito**.
+
+### Justificativa:
+
+* **Estudo Observacional:** O modelo compara pessoas diferentes no mesmo momento. Ele não acompanha a mesma pessoa ao longo do tempo para garantir que a perda/ganho de peso altere sua glicemia na mesma proporção.
+* **Confundimento Não Mensurado:** Fatores cruciais como dieta, uso de medicamentos, qualidade do sono e genética não foram considerados no modelo.
+* **Interpretação Correta:** O coeficiente reflete a **diferença média entre indivíduos** com IMCs distintos, e não o resultado direto de uma intervenção individual.
